@@ -29,9 +29,10 @@ The **Export** menu in the slide toolbar exports the active deck directly:
 - **PPTX (images)** — each page rendered as an image on a PowerPoint slide.
   Native editable PPTX export is not available yet.
 
-HTML snapshots keep `useIsActivePage()` false by default, preserving the deck's
-static content. Page transitions respect reduced-motion preferences, and the
-deck's CSS media queries still apply.
+HTML snapshots use the viewer’s current light or dark theme and include local
+assets referenced by inline styles. They keep `useIsActivePage()` false by
+default, preserving the deck's static content. Page transitions respect
+reduced-motion preferences, and the deck's CSS media queries still apply.
 
 For CSS entrances gated by `useIsActivePage()`, opt in in the deck module:
 

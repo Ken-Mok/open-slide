@@ -71,7 +71,7 @@ test.beforeAll(async ({ browserName }) => {
     fs.writeFile(path.join(path.dirname(entry), 'badge.png'), TINY_PNG),
     fs.writeFile(
       path.join(path.dirname(entry), 'lazy.ts'),
-      'export const message = "</script></style>";',
+      'export const message = "</script></style> 日本語 🧪";',
     ),
     fs.writeFile(
       path.join(path.dirname(entry), 'motion.css'),
@@ -93,6 +93,7 @@ test.beforeAll(async ({ browserName }) => {
   filename = path.join(projectDir, 'playable.html');
   const data = await fs.readFile(filename);
   expect(data.toString()).toContain('Copyright (c) 2026 Yiwei Ho');
+  expect(data.subarray(0, 1024).toString()).toContain('<meta charset="utf-8">');
   expect(data.toString()).not.toContain('Unrelated deck must be excluded');
   bytes = data.length;
   gzipBytes = gzipSync(data).length;
@@ -161,7 +162,7 @@ test('plays CSS and React animations, handlers, lazy imports and imported assets
     )
     .toBe(true);
   await page.getByTestId('interactive').click();
-  await expect(page.getByTestId('message')).toHaveText('</script></style>');
+  await expect(page.getByTestId('message')).toHaveText('</script></style> 日本語 🧪');
   expect(errors).toEqual([]);
   expect(externalRequests).toEqual([]);
   const timings = { buildMs, bytes, gzipBytes, firstSlideMs };
@@ -272,6 +273,17 @@ test('syncs a presenter popup with speaker notes and navigation from a local fil
   await expect(presenter.getByText('Second speaker note')).toBeVisible();
   await expect(otherProjection.getByTestId('first')).toBeVisible();
   await expect(otherProjection.getByTestId('step')).toBeVisible();
+});
+
+test('opens a directly embedded module and navigates offline', async ({ page }) => {
+  const output = path.join(projectDir, 'steps-inline.html');
+  const result = await runCli(['export', 'steps', '--output', output], projectDir);
+  expect(result.code, result.stdout + result.stderr).toBe(0);
+  expect(await fs.readFile(output, 'utf8')).toContain('<script type="module">');
+  await page.goto(pathToFileURL(output).href);
+  await expect(page.getByRole('heading', { name: 'Steps page one' })).toBeVisible();
+  await page.keyboard.press('ArrowRight');
+  await expect(page.getByRole('heading', { name: 'Steps page two' })).toBeVisible();
 });
 
 test('fails clearly for unknown decks without creating an artifact', async ({ browserName }) => {

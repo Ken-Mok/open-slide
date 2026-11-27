@@ -29,13 +29,24 @@ function createHtml(files: Rolldown.OutputBundle[string][], license: string): st
   }
   if (!code) throw new Error('Standalone build did not generate a player');
 
+  // Inline modules avoid parsing the whole bundle twice. HTML tokenizer
+  // markers require embedding the code as a string to preserve its bytes.
+  const player = /<\/script|<!--/i.test(code)
+    ? `<script>
+const player = document.createElement('script');
+player.type = 'module';
+player.textContent = ${scriptString(code)};
+document.body.append(player);
+</script>`
+    : `<script type="module">${code}</script>`;
+
   return `<!doctype html>
-<!--
-${license.trimEnd()}
--->
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<!--
+${license.trimEnd()}
+-->
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" href="data:,">
 <title>open-slide</title>
@@ -46,11 +57,8 @@ ${license.trimEnd()}
 const styles = document.createElement('style');
 styles.textContent = ${scriptString(styles.join('\n'))};
 document.head.append(styles);
-const player = document.createElement('script');
-player.type = 'module';
-player.textContent = ${scriptString(code)};
-document.body.append(player);
 </script>
+${player}
 </body>
 </html>
 `;

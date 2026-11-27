@@ -16,7 +16,10 @@ export const transition = {
   duration: 700,
   morph: true,
   enter: { keyframes: [{ opacity: 0 }, { opacity: 1 }] },
-  exit: { keyframes: [{ opacity: 1 }, { opacity: 0 }] },
+  exit: { keyframes: [
+    { opacity: 1, transform: 'translateX(0px)' },
+    { opacity: 0, transform: 'translateX(-20px)' },
+  ] },
 } satisfies Page['transition'];
 
 const First: Page = () => {
@@ -105,7 +108,12 @@ test.afterAll(async () => {
   if (projectDir) await fs.rm(projectDir, { recursive: true, force: true });
 });
 
-test.use({ offline: true, reducedMotion: 'no-preference' });
+test.use({ reducedMotion: 'no-preference' });
+
+test.beforeEach(async ({ context }) => {
+  // Playwright WebKit's offline switch also blocks file:// navigation.
+  await context.route(/^https?:/, (route) => route.abort('internetdisconnected'));
+});
 
 test('plays CSS and React animations, handlers, lazy imports and imported assets offline', async ({
   page,
@@ -176,21 +184,25 @@ test('replays steps, morph, enter/exit, reverse navigation and interruption', as
   await expect(morph).toBeAttached();
   const layer = page.locator('[data-osd-dir="forward"]');
   await expect(layer).toBeAttached();
-  const opacityFrames = await layer.evaluate((el) =>
-    [...el.children].flatMap((child) =>
-      child
-        .getAnimations()
-        .map((animation) =>
-          (animation.effect as KeyframeEffect).getKeyframes().map((frame) => frame.opacity),
-        ),
-    ),
+  const phases = await layer.evaluate((el) =>
+    [...el.children].slice(0, 2).map((child) => {
+      const effect = child.getAnimations()[0]?.effect as KeyframeEffect | undefined;
+      return effect?.getKeyframes().map((frame) => ({
+        opacity: frame.opacity === undefined ? null : Number(frame.opacity),
+        transform: frame.transform ?? null,
+      }));
+    }),
   );
-  expect(opacityFrames).toEqual(
-    expect.arrayContaining([
-      [1, 1],
-      [0, 1],
-    ]),
-  );
+  expect(phases).toEqual([
+    [
+      { opacity: null, transform: 'translateX(0px)' },
+      { opacity: null, transform: 'translateX(-20px)' },
+    ],
+    [
+      { opacity: 0, transform: null },
+      { opacity: 1, transform: null },
+    ],
+  ]);
   await page.keyboard.press('ArrowRight');
   await expect(page.getByTestId('third')).toBeVisible();
   await expect(morph).toHaveCount(0);
@@ -213,15 +225,40 @@ test('honors reduced motion and supports presentation controls', async ({ page }
   await expect(page.getByTestId('second')).toBeVisible();
   await expect(page.getByTestId('first')).toHaveCount(0);
   await expect(page.locator('[data-osd-morph-layer]')).toHaveCount(0);
-  await page.keyboard.press('End');
+  await page.keyboard.press('3');
+  await page.keyboard.press('Enter');
   await expect(page.getByTestId('third')).toBeVisible();
+  await page.keyboard.press('o');
+  const overview = page.getByRole('dialog', { name: 'Slide overview' });
+  await expect(overview).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(overview).toHaveCount(0);
+});
+
+test('returns to the same page after exiting fullscreen', async ({ page }) => {
+  await page.goto(exportedUrl);
+  await expect(page.getByTestId('first')).toBeVisible();
+  test.skip(!(await page.evaluate(() => document.fullscreenEnabled)), 'Fullscreen API unavailable');
+  const viewport = page.viewportSize();
+  if (!viewport) throw new Error('Expected a viewport');
+  await page.mouse.move(viewport.width / 2, viewport.height - 8);
+  const enter = page.getByRole('button', { name: 'Enter fullscreen' });
+  await enter.click();
+  await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(true);
+  await page.evaluate(() => document.exitFullscreen());
+  await expect(enter).toBeAttached();
+  await expect(page.getByTestId('first')).toBeVisible();
 });
 
 test('syncs a presenter popup with speaker notes and navigation from a local file', async ({
   page,
+  context,
 }) => {
   await page.goto(exportedUrl);
   await expect(page.getByTestId('first')).toBeVisible();
+  const otherProjection = await context.newPage();
+  await otherProjection.goto(exportedUrl);
+  await expect(otherProjection.getByTestId('first')).toBeVisible();
   const opened = page.waitForEvent('popup');
   await page.keyboard.press('p');
   const presenter = await opened;
@@ -233,6 +270,8 @@ test('syncs a presenter popup with speaker notes and navigation from a local fil
   await presenter.keyboard.press('ArrowRight');
   await expect(page.getByTestId('second')).toBeVisible();
   await expect(presenter.getByText('Second speaker note')).toBeVisible();
+  await expect(otherProjection.getByTestId('first')).toBeVisible();
+  await expect(otherProjection.getByTestId('step')).toBeVisible();
 });
 
 test('fails clearly for unknown decks without creating an artifact', async ({ browserName }) => {

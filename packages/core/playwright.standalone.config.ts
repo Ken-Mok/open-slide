@@ -5,8 +5,8 @@ export default defineConfig({
   workers: 1,
   forbidOnly: !!process.env.CI,
   projects: [
-    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
-    { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
+    { name: 'chromium', use: { ...devices['Desktop Chrome'], offline: true } },
+    { name: 'firefox', use: { ...devices['Desktop Firefox'], offline: true } },
     { name: 'webkit', use: { ...devices['Desktop Safari'] } },
   ],
 });

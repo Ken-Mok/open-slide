@@ -20,40 +20,54 @@ export type PresenterCommand =
 
 type Handler = (msg: PresenterCommand) => void;
 
-const SUPPORTED = typeof window !== 'undefined' && typeof BroadcastChannel !== 'undefined';
+type Connection = {
+  send: (message: PresenterCommand) => void;
+  close: () => void;
+};
 
-// Channel ownership lives in the effect (not useMemo) so StrictMode's
-// double-invoke produces a fresh channel on remount rather than leaving a
-// closed one behind that throws on the next send().
-export function usePresenterChannel(slideId: string, onMessage?: Handler) {
+export type PresenterTransport = (onMessage: Handler) => Connection | null;
+
+function connectBroadcast(slideId: string, onMessage: Handler): Connection | null {
+  if (typeof BroadcastChannel === 'undefined') return null;
+  const channel = new BroadcastChannel(`open-slide:presenter:${slideId}`);
+  channel.addEventListener('message', (event: MessageEvent<PresenterCommand>) =>
+    onMessage(event.data),
+  );
+  return {
+    send: (message) => channel.postMessage(message),
+    close: () => channel.close(),
+  };
+}
+
+export function usePresenterChannel(
+  slideId: string,
+  onMessage?: Handler,
+  transport?: PresenterTransport,
+) {
   const onMessageRef = useRef(onMessage);
   onMessageRef.current = onMessage;
 
-  const channelRef = useRef<BroadcastChannel | null>(null);
+  const channelRef = useRef<Connection | null>(null);
   const [available, setAvailable] = useState(false);
 
   useEffect(() => {
-    if (!SUPPORTED) return;
-    const channel = new BroadcastChannel(`open-slide:presenter:${slideId}`);
+    const receive: Handler = (message) => onMessageRef.current?.(message);
+    const channel = transport ? transport(receive) : connectBroadcast(slideId, receive);
+    if (!channel) return;
     channelRef.current = channel;
     setAvailable(true);
-    const handler = (e: MessageEvent<PresenterCommand>) => {
-      onMessageRef.current?.(e.data);
-    };
-    channel.addEventListener('message', handler);
     return () => {
-      channel.removeEventListener('message', handler);
       channel.close();
       if (channelRef.current === channel) channelRef.current = null;
       setAvailable(false);
     };
-  }, [slideId]);
+  }, [slideId, transport]);
 
   return useMemo(
     () => ({
       send(msg: PresenterCommand) {
         try {
-          channelRef.current?.postMessage(msg);
+          channelRef.current?.send(msg);
         } catch {
           // Channel may have been closed between the availability check
           // and the send (e.g. StrictMode unmount mid-flush). Treat as no-op.

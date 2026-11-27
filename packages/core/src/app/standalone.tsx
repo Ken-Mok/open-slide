@@ -1,10 +1,11 @@
 import { ThemeProvider } from 'next-themes';
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { HashRouter, Route, Routes } from 'react-router-dom';
+import { HashRouter, Route, Routes, useSearchParams } from 'react-router-dom';
 import { Player } from './components/player';
 import { TooltipProvider } from './components/ui/tooltip';
 import { slideIds } from './lib/slides';
+import { connectToProjection, createStandalonePresenter } from './lib/standalone-presenter';
 import { useDocumentTitle } from './lib/use-document-title';
 import { useSlideModule } from './lib/use-slide-module';
 import { Presenter } from './routes/presenter';
@@ -13,9 +14,10 @@ import './styles.css';
 function Projection({ slideId }: { slideId: string }) {
   const { slide, error } = useSlideModule(slideId);
   const [index, setIndex] = useState(0);
+  const [presenter] = useState(() => createStandalonePresenter(slideId));
   useDocumentTitle(slide?.meta?.title ?? slideId);
   if (error || (slide && !slide.default?.length)) {
-    return <div role="alert">{error ?? 'This deck has no pages.'}</div>;
+    return <div role="alert">{error ? error : 'This deck has no pages.'}</div>;
   }
   if (!slide?.default) return null;
   return (
@@ -30,9 +32,15 @@ function Projection({ slideId }: { slideId: string }) {
       fullscreen={false}
       allowExit={false}
       onExit={() => {}}
-      presenterUrl={`#/s/${encodeURIComponent(slideId)}/presenter`}
+      presenter={presenter}
     />
   );
+}
+
+function StandalonePresenter() {
+  const [query] = useSearchParams();
+  const [transport] = useState(() => connectToProjection(query.get('session')));
+  return <Presenter transport={transport} />;
 }
 
 const root = document.getElementById('root');
@@ -43,7 +51,7 @@ if (root && slideId) {
       <TooltipProvider delay={200}>
         <HashRouter>
           <Routes>
-            <Route path="/s/:slideId/presenter" element={<Presenter />} />
+            <Route path="/s/:slideId/presenter" element={<StandalonePresenter />} />
             <Route path="*" element={<Projection slideId={slideId} />} />
           </Routes>
         </HashRouter>

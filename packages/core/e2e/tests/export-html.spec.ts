@@ -41,16 +41,24 @@ export const transition = {
 } satisfies NonNullable<Page['transition']>;
 export default [Counter, Counter] satisfies Page[];
 `;
-const SOURCE = `import {
+const SOURCE = `import { useLayoutEffect, useRef, useState } from 'react';
+import {
   type Page, type SlideMeta, Step, Steps, useIsActivePage, useSlidePageNumber,
 } from '@open-slide/core';
 import badge from './badge.png';
+import backdrop from './back drop.png';
 import './entry.css';
 
 export const meta: SlideMeta = {
   title: 'HTML Motion Regression', createdAt: '2026-09-30T00:00:00.000Z',
 };
 export const htmlExport = { activePage: true };
+export const design = {
+  palette: { bg: '#101828', text: '#f9fafb', accent: '#83be29' },
+  fonts: { display: 'serif', body: 'sans-serif' },
+  typeScale: { hero: 88, body: 44 },
+  radius: 8,
+};
 export const transition = {
   duration: 500,
   exit: { duration: 400, keyframes: [{ opacity: 1 }, { opacity: 0 }] },
@@ -66,12 +74,23 @@ export const transition = {
 function Content({ label, steps = true }: { label: string; steps?: boolean }) {
   const active = useIsActivePage();
   const { current, total } = useSlidePageNumber();
+  const probe = useRef<HTMLDivElement>(null);
+  const [palette, setPalette] = useState('');
+  useLayoutEffect(() => {
+    if (probe.current) {
+      setPalette(getComputedStyle(probe.current).getPropertyValue('--osd-accent').trim());
+    }
+  }, []);
   return (
     <div className={active ? 'motion-page active' : 'motion-page'}
       data-entry-active={String(active)} data-page-number={current} data-page-total={total}>
       <img src={badge} alt="Bundled badge" width={20} height={20} />
       <h1>{label}</h1>
       <p data-css-entry>CSS entrance</p>
+      <div ref={probe} data-export-parity style={{ backgroundImage: 'url("' + backdrop + '")' }}>
+        {palette}
+      </div>
+      <p data-asset-path>{backdrop}</p>
       {steps && <Steps><Step><p>First detail</p></Step><Step><p>Second detail</p></Step></Steps>}
     </div>
   );
@@ -101,6 +120,8 @@ const CSS = `@keyframes html-export-entry {
 .motion-page { width: 100%; height: 100%; background: #101828; color: #f9fafb;
   padding: 120px; box-sizing: border-box; font: 44px system-ui, sans-serif; }
 .motion-page h1 { font-size: 88px; }
+[data-export-parity] { color: rgb(255, 255, 255); }
+.dark [data-export-parity] { color: rgb(131, 190, 41); }
 .motion-page [data-css-entry] { opacity: 0; }
 .motion-page.active [data-css-entry] { animation: html-export-entry 260ms ease-out both; }
 @media (prefers-reduced-motion: reduce) {
@@ -112,6 +133,7 @@ async function writeMotionSlide(dir: string) {
   await fs.mkdir(dir, { recursive: true });
   await fs.writeFile(path.join(dir, 'index.tsx'), SOURCE);
   await fs.writeFile(path.join(dir, 'entry.css'), CSS);
+  await fs.writeFile(path.join(dir, 'back drop.png'), TINY_PNG);
   await fs.writeFile(path.join(dir, 'badge.png'), TINY_PNG);
 }
 
@@ -244,6 +266,35 @@ test.describe('standalone HTML motion', () => {
     await expect(page.locator('.os-page:not([hidden]) [data-osd-step="pending"]')).toHaveCount(2);
     await page.screenshot({ path: info.outputPath('offline-first-page.png') });
     expect(errors).toEqual([]);
+  });
+
+  test('matches the live appearance and packages inline backgrounds', async ({
+    page,
+    context,
+  }, info) => {
+    await page.emulateMedia({ colorScheme: 'dark' });
+    await openSlide(page, MOTION_ID);
+    await expect(page.locator('html')).toHaveClass(/dark/);
+    const live = page.locator('main[data-inspector-root] [data-export-parity]');
+    await expect(live).toHaveText('#83be29');
+    await expect(live).toHaveCSS('color', 'rgb(131, 190, 41)');
+    const assetPath = await page.locator('main[data-inspector-root] [data-asset-path]').innerText();
+    const file = await downloadHtml(page, MOTION_ID, info);
+    await openOffline(page, context, file);
+    const exported = page.locator('.os-page:not([hidden]) [data-export-parity]');
+    await expect(exported).toHaveText('#83be29');
+    await expect(exported).toHaveCSS('color', 'rgb(131, 190, 41)');
+    await expect(page.locator('.os-page:not([hidden]) [data-asset-path]')).toHaveText(assetPath);
+    const imageLoaded = await exported.evaluate(async (element) => {
+      const background = getComputedStyle(element).backgroundImage;
+      const source = background.match(/^url\("(.*)"\)$/)?.[1];
+      if (!source?.startsWith('file:')) return false;
+      const image = new Image();
+      image.src = source;
+      await image.decode();
+      return image.naturalWidth > 0;
+    });
+    expect(imageLoaded).toBe(true);
   });
 
   test('uses incoming overrides, direction and v2 outgoing opacity semantics', async ({

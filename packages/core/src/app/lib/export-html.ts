@@ -9,6 +9,8 @@ import { holdOpacity, resolveTransition, type SlideTransition } from './transiti
 
 type AssetEntry = { name: string; bytes: Uint8Array };
 
+const CSS_URL_RE = /url\(\s*(['"]?)([^)'"]+)\1\s*\)/g;
+
 const ASSET_EXT_RE =
   /\.(?:png|jpe?g|gif|svg|webp|avif|mp4|webm|mov|woff2?|ttf|otf|mp3|wav|ogg)(?:\?[^#]*)?(?:#.*)?$/i;
 
@@ -16,18 +18,16 @@ export async function exportSlideAsHtml(slide: SlideModule, slideId: string): Pr
   const pages = slide.default ?? [];
   if (pages.length === 0) return;
   const title = slide.meta?.title ?? slideId;
+  const dark = document.documentElement.classList.contains('dark');
+  const { pagesHtml, pageAssets } = await renderPagesToHtml(slide);
 
-  const pagesHtml = await renderPagesToHtml(pages, slide.htmlExport?.activePage === true);
   const bundledCss = collectCss();
   const externalLinks = collectExternalStylesheetLinks();
 
   const assets = new Map<string, AssetEntry>();
   const usedNames = new Set<string>();
 
-  const urls = new Set<string>([
-    ...findHtmlAssetUrls(pagesHtml.join('\n')),
-    ...findCssAssetUrls(bundledCss),
-  ]);
+  const urls = new Set<string>([...findCssAssetUrls(bundledCss), ...pageAssets]);
 
   for (const url of urls) {
     const absolute = toAbsolute(url);
@@ -41,11 +41,12 @@ export async function exportSlideAsHtml(slide: SlideModule, slideId: string): Pr
     } catch {}
   }
 
-  const rewrittenPages = pagesHtml.map((html) => rewriteUrls(html, assets, 'html'));
-  const rewrittenCss = rewriteUrls(bundledCss, assets, 'css');
+  const rewrittenPages = pagesHtml.map((html) => rewritePageUrls(html, assets));
+  const rewrittenCss = rewriteCssUrls(bundledCss, assets, './');
 
   const html = buildHtml({
     title,
+    dark,
     pagesHtml: rewrittenPages,
     bundledCss: rewrittenCss,
     externalLinks,
@@ -72,10 +73,9 @@ export async function exportSlideAsHtml(slide: SlideModule, slideId: string): Pr
   downloadBlob(new Blob([zipped as BlobPart], { type: 'application/zip' }), `${slideId}.zip`);
 }
 
-async function renderPagesToHtml(
-  pages: NonNullable<SlideModule['default']>,
-  activePage: boolean,
-): Promise<string[]> {
+async function renderPagesToHtml(slide: SlideModule) {
+  const pages = slide.default ?? [];
+  const activePage = slide.htmlExport?.activePage === true;
   const container = document.createElement('div');
   container.setAttribute('aria-hidden', 'true');
   Object.assign(container.style, {
@@ -88,7 +88,8 @@ async function renderPagesToHtml(
   });
   document.body.appendChild(container);
 
-  const result: string[] = [];
+  const pagesHtml: string[] = [];
+  const pageAssets = new Set<string>();
   try {
     for (let i = 0; i < pages.length; i++) {
       const Page = pages[i];
@@ -96,6 +97,13 @@ async function renderPagesToHtml(
       const host = document.createElement('div');
       host.style.width = `${CANVAS_WIDTH}px`;
       host.style.height = `${CANVAS_HEIGHT}px`;
+      host.setAttribute('data-osd-canvas', '');
+      host.style.color = '#000';
+      if (slide.design) {
+        for (const [name, value] of Object.entries(designToCssVars(slide.design))) {
+          host.style.setProperty(name, value);
+        }
+      }
       container.appendChild(host);
       const root = createRoot(host);
       const content = activePage
@@ -111,14 +119,15 @@ async function renderPagesToHtml(
       for (const video of host.querySelectorAll('video')) {
         video.defaultMuted = video.muted;
       }
-      result.push(host.innerHTML);
+      for (const url of findHtmlAssetUrls(host)) pageAssets.add(url);
+      pagesHtml.push(host.innerHTML);
       root.unmount();
       container.removeChild(host);
     }
   } finally {
     container.remove();
   }
-  return result;
+  return { pagesHtml, pageAssets };
 }
 
 function collectCss(): string {
@@ -152,26 +161,25 @@ function collectExternalStylesheetLinks(): string {
   return links.join('\n');
 }
 
-function findHtmlAssetUrls(html: string): string[] {
+function findHtmlAssetUrls(host: HTMLElement): string[] {
   const out: string[] = [];
-  const attrRe = /\s(?:src|href|poster)="([^"]+)"/g;
-  for (const m of html.matchAll(attrRe)) {
-    if (looksLikeAsset(m[1])) out.push(m[1]);
-  }
-  const srcsetRe = /\ssrcset="([^"]+)"/g;
-  for (const m of html.matchAll(srcsetRe)) {
-    for (const part of m[1].split(',')) {
+  for (const element of host.querySelectorAll('[src], [href], [poster], [srcset], [style]')) {
+    for (const name of ['src', 'href', 'poster']) {
+      const url = element.getAttribute(name);
+      if (url && looksLikeAsset(url)) out.push(url);
+    }
+    for (const part of (element.getAttribute('srcset') ?? '').split(',')) {
       const url = part.trim().split(/\s+/)[0];
       if (url && looksLikeAsset(url)) out.push(url);
     }
+    out.push(...findCssAssetUrls(element.getAttribute('style') ?? ''));
   }
   return out;
 }
 
 function findCssAssetUrls(css: string): string[] {
   const out: string[] = [];
-  const re = /url\(\s*(['"]?)([^)'"]+)\1\s*\)/g;
-  for (const m of css.matchAll(re)) {
+  for (const m of css.matchAll(CSS_URL_RE)) {
     const url = m[2].trim();
     if (looksLikeAsset(url)) out.push(url);
   }
@@ -229,21 +237,48 @@ function shortHash(input: string): string {
   return (h >>> 0).toString(36).slice(0, 6);
 }
 
-function rewriteUrls(
-  source: string,
-  assets: Map<string, AssetEntry>,
-  kind: 'html' | 'css',
-): string {
-  let out = source;
-  for (const [orig, { name }] of assets) {
-    const replacement = kind === 'css' ? `./assets/${name}` : `assets/${name}`;
-    out = out.split(orig).join(replacement);
+function packagedAssetUrl(asset: AssetEntry): string {
+  return `assets/${encodeURIComponent(asset.name)}`;
+}
+
+function rewriteCssUrls(css: string, assets: Map<string, AssetEntry>, prefix: string): string {
+  return css.replace(CSS_URL_RE, (match, quote, url) => {
+    const asset = assets.get(url.trim());
+    return asset ? `url(${quote}${prefix}${packagedAssetUrl(asset)}${quote})` : match;
+  });
+}
+
+function rewritePageUrls(html: string, assets: Map<string, AssetEntry>): string {
+  if (assets.size === 0) return html;
+  const template = document.createElement('template');
+  template.innerHTML = html;
+  for (const element of template.content.querySelectorAll(
+    '[src], [href], [poster], [srcset], [style]',
+  )) {
+    for (const name of ['src', 'href', 'poster']) {
+      const url = element.getAttribute(name);
+      const asset = url && assets.get(url);
+      if (asset) element.setAttribute(name, packagedAssetUrl(asset));
+    }
+    const srcset = element.getAttribute('srcset');
+    if (srcset) {
+      element.setAttribute(
+        'srcset',
+        srcset.replace(/(^|,)(\s*)([^\s,]+)/g, (match, separator, space, url) => {
+          const asset = assets.get(url);
+          return asset ? `${separator}${space}${packagedAssetUrl(asset)}` : match;
+        }),
+      );
+    }
+    const style = element.getAttribute('style');
+    if (style) element.setAttribute('style', rewriteCssUrls(style, assets, ''));
   }
-  return out;
+  return template.innerHTML;
 }
 
 function buildHtml(opts: {
   title: string;
+  dark: boolean;
   pagesHtml: string[];
   bundledCss: string;
   externalLinks: string;
@@ -275,7 +310,7 @@ function buildHtml(opts: {
   const transitionData = JSON.stringify(transitions).replace(/</g, '\\u003c');
 
   return `<!doctype html>
-<html lang="en">
+<html lang="en" class="${opts.dark ? 'dark' : 'light'}" style="color-scheme: ${opts.dark ? 'dark' : 'light'}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">

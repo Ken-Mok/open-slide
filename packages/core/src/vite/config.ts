@@ -56,6 +56,7 @@ export type CreateViteConfigOptions = {
   userCwd: string;
   config?: OpenSlideConfig;
   mode?: 'serve' | 'build';
+  standaloneSlide?: string;
 };
 
 export async function createViteConfig(opts: CreateViteConfigOptions): Promise<InlineConfig> {
@@ -77,7 +78,12 @@ export async function createViteConfig(opts: CreateViteConfigOptions): Promise<I
       locTagsPlugin({ userCwd, slidesDir }),
       react(),
       tailwindcss(),
-      openSlidePlugin({ userCwd, config, coreVersion: CORE_VERSION }),
+      openSlidePlugin({
+        userCwd,
+        config,
+        coreVersion: CORE_VERSION,
+        onlySlide: opts.standaloneSlide,
+      }),
       themesPlugin({ userCwd, config }),
       designPlugin({ userCwd }),
       apiPlugin({ userCwd, slidesDir, assetsDir, coreVersion: CORE_VERSION }),

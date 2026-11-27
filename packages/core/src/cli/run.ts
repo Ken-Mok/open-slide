@@ -70,6 +70,10 @@ interface BuildFlags {
   outDir?: string;
 }
 
+interface ExportFlags {
+  output?: string;
+}
+
 interface SyncFlags {
   dryRun?: boolean;
 }
@@ -113,6 +117,16 @@ export async function run(argv: string[]): Promise<void> {
       await assertViteResolvesToCore();
       const { build } = await import('./build.ts');
       await build(flags);
+    });
+
+  program
+    .command('export <slide-id>')
+    .description('Export a playable deck as a standalone HTML file')
+    .option('-o, --output <file>', 'output file (defaults to <slide-id>.html)')
+    .action(async (slideId: string, flags: ExportFlags) => {
+      await assertViteResolvesToCore();
+      const { exportStandalone } = await import('./export.ts');
+      await exportStandalone(slideId, flags.output);
     });
 
   program

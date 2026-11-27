@@ -41,6 +41,7 @@ type Props = {
   allowExit?: boolean;
   controls?: boolean;
   slideId?: string;
+  presenterUrl?: string;
   onSwitchSlide?: (slideId: string) => void;
   /**
    * When true, the Player enters the browser Fullscreen API on mount.
@@ -60,6 +61,7 @@ export function Player({
   allowExit = true,
   controls = false,
   slideId,
+  presenterUrl,
   onSwitchSlide,
   fullscreen = true,
 }: Props) {
@@ -352,7 +354,7 @@ export function Player({
         setHelpOpen((v) => !v);
       } else if ((e.key === 'p' || e.key === 'P') && slideId) {
         e.preventDefault();
-        openPresenterWindow(slideId);
+        openPresenterWindow(slideId, presenterUrl);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -370,6 +372,7 @@ export function Player({
     handleIndexChange,
     pages.length,
     slideId,
+    presenterUrl,
   ]);
 
   // The control bar + progress strip only surface when the pointer is in
@@ -442,7 +445,7 @@ export function Player({
             onOverview={() => setOverviewOpen(true)}
             onBlackout={(mode) => setBlackout((c) => (c === mode ? null : mode))}
             onLaser={() => setLaser((v) => !v)}
-            onPresenter={() => slideId && openPresenterWindow(slideId)}
+            onPresenter={() => slideId && openPresenterWindow(slideId, presenterUrl)}
             onToggleFullscreen={toggleFullscreen}
             onHelp={() => setHelpOpen(true)}
             onExit={onExit}
@@ -465,8 +468,9 @@ export function Player({
   );
 }
 
-export function openPresenterWindow(slideId: string) {
+export function openPresenterWindow(slideId: string, presenterUrl?: string) {
   if (typeof window === 'undefined') return;
-  const url = `${import.meta.env.BASE_URL}s/${encodeURIComponent(slideId)}/presenter`;
+  const url =
+    presenterUrl ?? `${import.meta.env.BASE_URL}s/${encodeURIComponent(slideId)}/presenter`;
   window.open(url, `open-slide-presenter-${slideId}`, 'popup,width=1280,height=800');
 }

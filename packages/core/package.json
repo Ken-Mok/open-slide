@@ -36,7 +36,6 @@
     "build": "tsdown",
     "typecheck": "tsc --noEmit",
     "test:e2e": "pnpm run build && playwright test",
-    "test:e2e:standalone": "pnpm run build && playwright test -c playwright.standalone.config.ts",
     "prepack": "pnpm build"
   },
   "engines": {

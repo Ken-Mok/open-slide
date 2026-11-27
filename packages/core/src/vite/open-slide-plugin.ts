@@ -14,7 +14,6 @@ export type OpenSlidePluginOptions = {
   userCwd: string;
   config: OpenSlideConfig;
   coreVersion: string;
-  onlySlide?: string;
 };
 
 const CONFIG_FILE = 'open-slide.config.ts';
@@ -169,7 +168,7 @@ ${cases}
 }
 
 export function openSlidePlugin(opts: OpenSlidePluginOptions): Plugin {
-  const { userCwd, config, coreVersion, onlySlide } = opts;
+  const { userCwd, config, coreVersion } = opts;
   const slidesDir = config.slidesDir ?? 'slides';
   const slidesRoot = path.resolve(userCwd, slidesDir);
   const manifestPath = foldersManifestPath(slidesRoot);
@@ -215,17 +214,7 @@ export function openSlidePlugin(opts: OpenSlidePluginOptions): Plugin {
     },
     async load(id) {
       if (id === resolved(SLIDES_VMOD)) {
-        const discovered = await findSlides(userCwd, slidesDir);
-        const files = onlySlide
-          ? discovered.filter((file) => toId(file, slidesRoot) === onlySlide)
-          : discovered;
-        if (onlySlide && files.length !== 1) {
-          this.error(
-            files.length
-              ? `Multiple entries for slide: ${onlySlide}`
-              : `Slide not found: ${onlySlide}`,
-          );
-        }
+        const files = await findSlides(userCwd, slidesDir);
         const { code, ignored } = await generateSlidesModule(files, slidesRoot, isDev);
         for (const slideId of ignored) {
           if (warnedInvalidSlideIds.has(slideId)) continue;

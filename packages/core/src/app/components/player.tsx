@@ -21,7 +21,6 @@ import { usePointerNearBottom } from './present/use-pointer-near-bottom';
 import {
   type PresenterCommand,
   type PresenterState,
-  type PresenterTransport,
   usePresenterChannel,
 } from './present/use-presenter-channel';
 import { useTouchSwipe } from './present/use-touch-swipe';
@@ -42,7 +41,6 @@ type Props = {
   allowExit?: boolean;
   controls?: boolean;
   slideId?: string;
-  presenter?: { open: () => void; transport: PresenterTransport };
   onSwitchSlide?: (slideId: string) => void;
   /**
    * When true, the Player enters the browser Fullscreen API on mount.
@@ -62,7 +60,6 @@ export function Player({
   allowExit = true,
   controls = false,
   slideId,
-  presenter,
   onSwitchSlide,
   fullscreen = true,
 }: Props) {
@@ -217,10 +214,9 @@ export function Player({
   }, [windowed]);
 
   useEffect(() => {
+    if (!allowExit) return;
     const onFsChange = () => {
-      if (document.fullscreenElement || windowedRef.current) return;
-      if (allowExit) onExit();
-      else setWindowed(true);
+      if (!document.fullscreenElement && !windowedRef.current) onExit();
     };
     document.addEventListener('fullscreenchange', onFsChange);
     return () => document.removeEventListener('fullscreenchange', onFsChange);
@@ -264,24 +260,15 @@ export function Player({
     [goNext, goPrev, handleIndexChange, pages.length, slideId, onSwitchSlide],
   );
 
-  const channel = usePresenterChannel(
-    slideId ?? '__none__',
-    (msg) => {
-      if (!controls) return;
-      handlePresenterCommand(msg, (m) => channel.send(m));
-    },
-    presenter?.transport,
-  );
+  const channel = usePresenterChannel(slideId ?? '__none__', (msg) => {
+    if (!controls) return;
+    handlePresenterCommand(msg, (m) => channel.send(m));
+  });
 
   useEffect(() => {
     if (!controls || !channel.available) return;
     channel.send({ type: 'state', state: presenterState });
   }, [controls, channel, presenterState]);
-
-  const openPresenter = useCallback(() => {
-    if (presenter) presenter.open();
-    else if (slideId) openPresenterWindow(slideId);
-  }, [presenter, slideId]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -365,7 +352,7 @@ export function Player({
         setHelpOpen((v) => !v);
       } else if ((e.key === 'p' || e.key === 'P') && slideId) {
         e.preventDefault();
-        openPresenter();
+        openPresenterWindow(slideId);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -383,7 +370,6 @@ export function Player({
     handleIndexChange,
     pages.length,
     slideId,
-    openPresenter,
   ]);
 
   // The control bar + progress strip only surface when the pointer is in
@@ -456,7 +442,7 @@ export function Player({
             onOverview={() => setOverviewOpen(true)}
             onBlackout={(mode) => setBlackout((c) => (c === mode ? null : mode))}
             onLaser={() => setLaser((v) => !v)}
-            onPresenter={openPresenter}
+            onPresenter={() => slideId && openPresenterWindow(slideId)}
             onToggleFullscreen={toggleFullscreen}
             onHelp={() => setHelpOpen(true)}
             onExit={onExit}

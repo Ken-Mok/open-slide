@@ -27,7 +27,6 @@ import { cn, pad2 } from '@/lib/utils';
 import { NoteMarkdown } from '../components/note-markdown';
 import {
   type PresenterState,
-  type PresenterTransport,
   usePresenterChannel,
 } from '../components/present/use-presenter-channel';
 import { SlideCanvas } from '../components/slide-canvas';
@@ -38,7 +37,7 @@ import { loadSlide, slideIds } from '../lib/slides';
 import { type StepController, StepHost } from '../lib/step-context';
 import { useSlideModule } from '../lib/use-slide-module';
 
-export function Presenter({ transport }: { transport?: PresenterTransport } = {}) {
+export function Presenter() {
   const { slideId = '' } = useParams();
   const { slide, error } = useSlideModule(slideId);
   useDocumentTitle(slide?.meta?.title);
@@ -59,16 +58,12 @@ export function Presenter({ transport }: { transport?: PresenterTransport } = {}
     setWarmedTick((n) => n + 1);
   }, [slideId]);
 
-  const channel = usePresenterChannel(
-    slideId,
-    (msg) => {
-      if (msg.type === 'state') {
-        setState(msg.state);
-        setHasProjection(true);
-      }
-    },
-    transport,
-  );
+  const channel = usePresenterChannel(slideId, (msg) => {
+    if (msg.type === 'state') {
+      setState(msg.state);
+      setHasProjection(true);
+    }
+  });
 
   // A deck switch reuses this route instance, so the handshake state from
   // the previous deck must be dropped before rejoining on the new channel.
@@ -558,18 +553,15 @@ const NOTES_FONT_SIZE_STORAGE_KEY = 'open-slide:presenter-notes-font-size';
 function SpeakerNotes({ note }: { note: string | undefined }) {
   const t = useLocale();
   const [sizeIndex, setSizeIndex] = useState(() => {
-    try {
-      const stored = Number(window.localStorage.getItem(NOTES_FONT_SIZE_STORAGE_KEY));
-      const index = NOTES_FONT_SIZES.indexOf(stored);
-      if (index !== -1) return index;
-    } catch {}
-    return NOTES_FONT_SIZE_DEFAULT_INDEX;
+    if (typeof window === 'undefined') return NOTES_FONT_SIZE_DEFAULT_INDEX;
+    const stored = Number(window.localStorage.getItem(NOTES_FONT_SIZE_STORAGE_KEY));
+    return NOTES_FONT_SIZES.includes(stored)
+      ? NOTES_FONT_SIZES.indexOf(stored)
+      : NOTES_FONT_SIZE_DEFAULT_INDEX;
   });
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(NOTES_FONT_SIZE_STORAGE_KEY, String(NOTES_FONT_SIZES[sizeIndex]));
-    } catch {}
+    window.localStorage.setItem(NOTES_FONT_SIZE_STORAGE_KEY, String(NOTES_FONT_SIZES[sizeIndex]));
   }, [sizeIndex]);
 
   return (
